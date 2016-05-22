@@ -1,0 +1,124 @@
+---
+title: "machine learning course project"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(cache = TRUE)
+knitr::opts_chunk$set(message = FALSE)
+knitr::opts_chunk$set(warning = FALSE)
+options(warn=-1)
+```
+
+# An analysis of the weight lifting exercises dataset
+
+## Summary
+This document describes analysis done for the final assigment of the Coursera Practical Machine Learning class. 
+The task of the project was to predict how well subjects performed weight lifting excercises based on data collected form accelerometers attached to the person performing the exercises. The dataset cantains data from six different people and outcome was classified into 5 different categories. Our task is to predict classe of excercise based on accelerometers data. Also in course project there is testing dataset with 20 samples and there is quiz, which checks prediction results of testing set. 
+
+## Setup
+### Load data
+First of all, we load necessary libs and two datasets. In testing dataset there are many NA values. Also in testing set there are "#DIV/0!" values and they also replaced by NA
+```{r}
+library(dplyr)
+library(caret)
+library(corrplot)
+library(scales)
+library(doParallel)
+set.seed(12345)
+
+url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv" ;  
+trainfile <-"pml-training.csv"
+if( !file.exists(trainfile) ) download.file( url, trainfile, quiet=TRUE)
+traindataset<-read.csv(trainfile,na.strings=c(""," ","NA","#DIV/0!"))
+url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv" ;  
+testfile <-"pml-testing.csv"
+if( !file.exists(testfile) ) download.file( url, testfile, quiet=TRUE)
+testdataset<-read.csv(testfile,na.strings=c(""," ","NA","#DIV/0!"))
+```
+
+### Data cleaning
+
+In our testing dataset there are many NA values, so before  doing any machine learning algorithm we cleaned our data.
+
+```{r}
+
+nrow(traindataset)
+na_count <-sapply(traindataset, function(y) sum(length(which(is.na(y)))))
+na_count <- data.frame(na_count)
+na_count$column <-row.names(na_count)
+na_count<-arrange(na_count,-na_count) 
+unique(na_count$na_count)
+```
+As we can see there are columns with more than 97% of NA in it. So we exclude it from our dataset. Also first 7 columns contains description of the current sample, not the sample data, so we also exclude this columns (number, user_name, time info and windows info)
+
+```{r}
+traindataset_sub<-dplyr::select(traindataset,-c(1,2,3,4,5,6,7,one_of(na_count[na_count$na_count>0,2])))
+table(is.na(traindataset_sub))
+```
+
+### Data check
+
+Also before machine learning we checked data on correlation. This step reduces count of predictors.
+
+```{r, fig.width = 10.5, fig.height=10}
+traindataset_sub_num  <- data.frame(lapply(traindataset_sub[,-ncol(traindataset_sub)], function (x) as.numeric(x)))
+traincorr<-abs(cor(traindataset_sub_num)) 
+diag(traincorr) <-0
+corrplot(traincorr,type = "lower") 
+highlycorr <-findCorrelation(traincorr,cutoff = 0.8)
+traindataset_sub<-traindataset_sub[,-highlycorr] 
+```
+
+## Machine learning
+
+First we split our testing set in test and training part
+```{r}
+inTrain <- createDataPartition(y=traindataset_sub$class,p=0.75,list=F)
+train_sample <- traindataset_sub[inTrain,]
+test_sample <- traindataset_sub[-inTrain,]
+```
+
+When we performed two machine learning algorithms: LDA and random forest.
+```{r}
+
+cl <- makeCluster(detectCores())
+registerDoParallel(cl)
+tc = trainControl(method = "cv",number = 10)
+
+modrf <- train(classe~.,method = "rf",train_sample,trControl = tc, allowParallel = TRUE )
+modlda <- train(classe~.,method = "lda",train_sample)
+stopCluster(cl)
+```
+When we look at our in nd out of sample errors:
+```{r}
+predrf<-predict(modrf,test_sample)
+confusionMatrix(predrf,test_sample$classe)
+
+predrftrain<-predict(modrf,train_sample)
+confusionMatrix(predrftrain,train_sample$classe)
+
+
+predlda<-predict(modlda,test_sample)
+confusionMatrix(predlda,test_sample$classe)
+
+predldatrain<-predict(modlda,train_sample)
+confusionMatrix(predldatrain,train_sample$classe)
+
+```
+
+As we can see random forest model have very good accuracy and Sensitivity and Specificity for all classes for test and train sample, so our model is not overfitted for train dataset. Lets look on variable importance plot 
+
+```{r}
+varImpPlot(modrf$finalModel)
+```
+
+## Test sample prediction
+
+Then we perform prediction to on our test samples. It performs 20/20 on Course project quiz, so our model is quite good.
+```{r}
+
+predrftest<-predict(modrf,testdataset)
+predrftest
+```
